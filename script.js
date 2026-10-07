@@ -362,8 +362,9 @@ function renderWizardStep(){
 function renderExerciseListHTML(exercises){
   if(!exercises.length)return`<div style="color:var(--text-dim);font-size:0.85rem;text-align:center;padding:16px">Nenhum exercício ainda</div>`;
   return exercises.map((e,i)=>`
-    <div class="exercise-item">
+    <div class="exercise-item" data-index="${i}" draggable="true" ondragstart="dragEx(event, ${i})" ondragover="allowDropEx(event)" ondrop="dropEx(event, ${i})">
       <div class="exercise-item-header">
+        <div ontouchstart="touchStartEx(event, ${i})" ontouchmove="touchMoveEx(event)" ontouchend="touchEndEx(event)" style="cursor:grab; color:var(--text-dim); font-size:1.2rem; display:flex; align-items:center; user-select:none; padding:4px" title="Arraste para reordenar">☰</div>
         <div style="flex:1">
           <div class="exercise-item-name">${e.name}</div>
           <div class="exercise-item-meta">
@@ -531,6 +532,56 @@ function removeExercise(splitIdx,exIdx){
   wizardState.splits[splitIdx].exercises.splice(exIdx,1);
   const listEl=document.getElementById('splitExerciseList');
   if(listEl)listEl.innerHTML=renderExerciseListHTML(wizardState.splits[splitIdx].exercises);
+}
+
+let draggedExIndex = null;
+
+function dragEx(e, i) {
+  draggedExIndex = i;
+  e.dataTransfer.effectAllowed = "move";
+}
+function allowDropEx(e) {
+  e.preventDefault();
+}
+function dropEx(e, targetIndex) {
+  e.preventDefault();
+  if (draggedExIndex === null || draggedExIndex === targetIndex) return;
+  executeReorder(draggedExIndex, targetIndex);
+  draggedExIndex = null;
+}
+
+function touchStartEx(e, i) {
+  draggedExIndex = i;
+  const item = e.target.closest('.exercise-item');
+  if(item) item.style.opacity = '0.5';
+}
+function touchMoveEx(e) {
+  if (draggedExIndex === null) return;
+  e.preventDefault(); // prevent scrolling while dragging
+}
+function touchEndEx(e) {
+  if (draggedExIndex === null) return;
+  document.querySelectorAll('.exercise-item').forEach(item => item.style.opacity = '1');
+  
+  const touch = e.changedTouches[0];
+  const el = document.elementFromPoint(touch.clientX, touch.clientY);
+  const dropTarget = el ? el.closest('.exercise-item') : null;
+  
+  if (dropTarget) {
+    const targetIndex = parseInt(dropTarget.getAttribute('data-index'), 10);
+    if (!isNaN(targetIndex) && targetIndex !== draggedExIndex) {
+      executeReorder(draggedExIndex, targetIndex);
+    }
+  }
+  draggedExIndex = null;
+}
+
+function executeReorder(fromIdx, toIdx) {
+  const split = wizardState.splits[wizardState.currentSplitIdx];
+  const ex = split.exercises.splice(fromIdx, 1)[0];
+  split.exercises.splice(toIdx, 0, ex);
+  const listEl=document.getElementById('splitExerciseList');
+  if(listEl)listEl.innerHTML=renderExerciseListHTML(split.exercises);
 }
 
 // ══════════════════════════════════════════
