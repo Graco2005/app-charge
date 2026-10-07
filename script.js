@@ -224,7 +224,7 @@ function deletePlan(id){
 }
 function editPlan(id){
   const plan=plans.find(p=>p.id===id);if(!plan)return;
-  wizardState={step:0,freq:plan.splits.length,planName:plan.name,
+  wizardState={step:2,freq:plan.splits.length,planName:plan.name,
     splits:plan.splits.map(s=>({...s,exercises:s.exercises.map(e=>({...e,seriesConfig:[...(e.seriesConfig||[])]})) })),
     editId:id,currentSplitIdx:0};
   document.getElementById('wizardTitle').textContent='Editar Treino';
@@ -294,8 +294,14 @@ function openNewPlanWizard(){
 }
 
 function renderWizardStep(){
-  const total=3+wizardState.splits.length;
-  document.getElementById('wizardSteps').innerHTML=Array.from({length:total},(_,i)=>`<div class="step-dot ${i<wizardState.step?'done':''}"></div>`).join('');
+  const stepsEl = document.getElementById('wizardSteps');
+  if(wizardState.editId){
+    stepsEl.style.display = 'none';
+  } else {
+    stepsEl.style.display = 'flex';
+    const total=3+wizardState.splits.length;
+    stepsEl.innerHTML=Array.from({length:total},(_,i)=>`<div class="step-dot ${i<wizardState.step?'done':''}"></div>`).join('');
+  }
   document.getElementById('wizardBtnBack').style.display=wizardState.step===0?'none':'';
   const c=document.getElementById('wizardContent');
   if(wizardState.step===0){
@@ -334,13 +340,22 @@ function renderWizardStep(){
     document.getElementById('wizardBtnNext').textContent=si<wizardState.splits.length-1?'Próximo →':'Revisar ✓';
     wizardState.currentSplitIdx=si;
     const split=wizardState.splits[si];
+    const splitTabs = wizardState.splits.map((s, idx) => `
+      <div onclick="jumpToSplit(${idx})" style="padding: 8px 12px; border-bottom: 2px solid ${idx === si ? 'var(--accent)' : 'transparent'}; color: ${idx === si ? 'var(--text)' : 'var(--text-sec)'}; cursor: pointer; font-weight: 600; display:flex; align-items:center; gap: 6px; white-space:nowrap; transition:all 0.2s;">
+        <div class="division-letter" style="width:24px;height:24px;font-size:0.8rem;${idx === si ? '' : 'background:var(--border);color:var(--text-sec)'}">${s.letter}</div>
+        ${s.name}
+      </div>
+    `).join('');
     c.innerHTML=`
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
-        <div class="division-letter">${split.letter}</div>
-        <div><div style="font-weight:700;font-family:'Space Grotesk',sans-serif">${split.name}</div><div style="font-size:0.75rem;color:var(--text-sec)">Adicione os exercícios deste treino</div></div>
+      <div style="display:flex; overflow-x:auto; margin-bottom: 16px; border-bottom: 1px solid var(--border); gap:8px;">
+        ${splitTabs}
       </div>
       <div id="splitExerciseList">${renderExerciseListHTML(split.exercises)}</div>
       <button class="btn btn-secondary btn-sm btn-block" style="margin-top:10px" onclick="openAddExercise(${si})">+ Adicionar Exercício</button>`;
+  }
+  if(wizardState.editId){
+    const btnNext = document.getElementById('wizardBtnNext');
+    if(btnNext) btnNext.textContent = 'Salvar Alterações ✓';
   }
 }
 
@@ -371,17 +386,38 @@ function selectFreq(n,el){
   el.classList.add('selected');
 }
 
-function wizardNext(){
+function saveCurrentStepState() {
   if(wizardState.step===0){
     const name=document.getElementById('wPlanName')?.value?.trim();
-    if(!name){toast('Dê um nome ao plano!','error');return;}
-    wizardState.planName=name;wizardState.step=1;
+    if(name) wizardState.planName=name;
   } else if(wizardState.step===1){
     for(let i=0;i<wizardState.splits.length;i++){
       const v=document.getElementById(`wSplit${i}`)?.value?.trim();
-      if(!v){toast(`Nomeie o treino ${wizardState.splits[i].letter}!`,'error');return;}
-      wizardState.splits[i].name=v;
+      if(v) wizardState.splits[i].name=v;
     }
+  }
+}
+
+function wizardNext(){
+  saveCurrentStepState();
+  while(wizardState.splits.length<wizardState.freq)wizardState.splits.push({letter:LETTERS[wizardState.splits.length],name:'',exercises:[]});
+  wizardState.splits=wizardState.splits.slice(0,wizardState.freq);
+
+  if(!wizardState.planName){toast('Dê um nome ao plano!','error');return;}
+  // We only require split names if they actually progressed to step 1 or are saving.
+  // Wait, if they are just moving from step 0 to step 1, they don't have split names yet.
+  // So validation depends on the action.
+  
+  if(wizardState.editId){
+    if(wizardState.splits.some(s=>!s.name)){toast('Nomeie todos os treinos!','error');return;}
+    savePlan();
+    return;
+  }
+  
+  if(wizardState.step===0){
+    wizardState.step=1;
+  } else if(wizardState.step===1){
+    if(wizardState.splits.some(s=>!s.name)){toast('Nomeie todos os treinos!','error');return;}
     wizardState.step=2;
   } else {
     const si=wizardState.step-2;
@@ -390,7 +426,17 @@ function wizardNext(){
   }
   renderWizardStep();
 }
-function wizardBack(){if(wizardState.step>0)wizardState.step--;renderWizardStep();}
+function wizardBack(){
+  saveCurrentStepState();
+  if(wizardState.step>0)wizardState.step--;
+  renderWizardStep();
+}
+
+function jumpToSplit(idx){
+  saveCurrentStepState();
+  wizardState.step=2+idx;
+  renderWizardStep();
+}
 
 function savePlan(){
   const np={id:wizardState.editId||uid(),name:wizardState.planName,splits:wizardState.splits,active:true,createdAt:new Date().toISOString()};
@@ -698,7 +744,12 @@ function finishSession(){
   };
   sessions=sessions.filter(s=>s.date!==session.date);
   sessions.push(entry);sessions.sort((a,b)=>a.date.localeCompare(b.date));
-  save();clearSessionDraft();clearInterval(_autosaveTimer);session=null;closeModal('modalFinish');toast('Treino salvo! ⚡ Boa evolução!');
+  save();clearSessionDraft();clearInterval(_autosaveTimer);
+  
+  const wasPast = session.date !== today() && !session.isEditing;
+  const msg = wasPast ? `Treino salvo para o dia ${fmtDate(session.date)}!` : 'Treino salvo! ⚡ Boa evolução!';
+  
+  session=null;closeModal('modalFinish');toast(msg);
   switchScreen('screenHome',document.querySelector('[data-screen="screenHome"]'));
 }
 
@@ -1077,9 +1128,29 @@ function toggleTheme(){
 
 document.addEventListener('DOMContentLoaded',()=>{
   applyTheme(localStorage.getItem('charge_theme')||'dark');
+  autoFillRestDays();
   checkDraftOnLoad();
   renderHome();
 });
+
+function autoFillRestDays(){
+  const activeP=activePlan();
+  if(!activeP||sessions.length===0)return;
+  const dates=sessions.map(s=>s.date).sort();
+  const earliest=new Date(dates[0]+'T12:00:00');
+  const yest=new Date();yest.setDate(yest.getDate()-1);
+  let changed=false;
+  let d=new Date(earliest);
+  while(d<=yest){
+    const dStr=d.toISOString().slice(0,10);
+    if(!sessions.find(x=>x.date===dStr)){
+      sessions.push({id:uid(),type:'rest',date:dStr,note:'Descanso automático'});
+      changed=true;
+    }
+    d.setDate(d.getDate()+1);
+  }
+  if(changed){sessions.sort((a,b)=>a.date.localeCompare(b.date));save();}
+}
 
 function checkDraftOnLoad(){
   const draft=loadSessionDraft();
@@ -1095,7 +1166,14 @@ function renderDraftBanner(){
   if(!banner)return;
   if(!draft){banner.style.display='none';return;}
   const sub=document.getElementById('draftBannerSub');
-  if(sub)sub.textContent=`Treino ${draft.splitLetter} — ${draft.splitName} · iniciado ${new Date(draft.startTime).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
+  const isPast = draft.date && draft.date < today();
+  if(sub){
+    if(isPast){
+      sub.innerHTML=`<span style="color:var(--red);font-weight:600">Você esqueceu de finalizar este treino em ${fmtDate(draft.date)}. Finalize-o agora!</span>`;
+    }else{
+      sub.textContent=`Treino ${draft.splitLetter} — ${draft.splitName} · iniciado ${new Date(draft.startTime).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`;
+    }
+  }
   banner.style.display='flex';
 }
 
